@@ -1,12 +1,11 @@
 """
-main.py — FastAPI app initialization, CORS, and uvicorn entry point.
+main.py — FastAPI app entry point.
 
-No business logic lives here. This file:
+This file:
   1. Creates the FastAPI app
-  2. Configures CORS for React frontend + Browser Extension
-  3. Loads the ML model once at startup via lifespan
-  4. Includes the router from api/routes.py
-  5. Starts uvicorn
+  2. Configures CORS for React frontend + Chrome Extension
+  3. Defines the streaming and simple analysis endpoints
+  4. Runs uvicorn
 """
 
 import logging
@@ -15,30 +14,19 @@ from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
 logger = logging.getLogger(__name__)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Lifespan — ML model loads once on startup, released on shutdown
+# Lifespan — startup / shutdown hooks
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # ── Startup ───────────────────────────────────────────
-    try:
-        from ml.model_loader import FakeNewsDetector
-
-        app.state.model = FakeNewsDetector()
-        logger.info("✅ ML model loaded successfully.")
-    except Exception as e:
-        app.state.model = None
-        logger.warning(f"⚠️ ML model failed to load: {e}. /api/analyze will be unavailable.")
-
+    logger.info("🚀 Fake News Detector API starting up...")
     yield
-
-    # ── Shutdown ──────────────────────────────────────────
-    app.state.model = None
-    logger.info("🛑 ML model released from memory.")
+    logger.info("🛑 Fake News Detector API shutting down...")
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -46,13 +34,13 @@ async def lifespan(app: FastAPI):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 app = FastAPI(
     title="Fake News Detector API",
-    version="2.0",
+    version="1.0.0",
     lifespan=lifespan,
 )
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# CORS — allow all origins for React frontend + Browser Extension
+# CORS — allow React frontend + Chrome Extension origins
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 app.add_middleware(
     CORSMiddleware,
@@ -64,13 +52,44 @@ app.add_middleware(
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Router — all endpoints defined in api/routes.py
-# Routes already carry their full paths (/, /health, /api/*)
-# so no prefix is needed here.
+# Endpoints
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-from api.routes import router  # noqa: E402
+@app.post("/api/analyze-stream")
+async def analyze_stream(url: str):
+    """
+    Streaming endpoint for the website (shows chain of thought).
+    Returns SSE stream of agent thoughts.
+    """
+    from agents.orchestrator import AgentOrchestrator
 
-app.include_router(router)
+    orchestrator = AgentOrchestrator()
+    return StreamingResponse(
+        orchestrator.run_chain(url),
+        media_type="text/event-stream",
+    )
+
+
+@app.post("/api/analyze-simple")
+async def analyze_simple(url: str):
+    """
+    Simple endpoint for Chrome extension (no streaming).
+    Returns final verdict only.
+    """
+    from agents.orchestrator import AgentOrchestrator
+
+    orchestrator = AgentOrchestrator()
+    result = await orchestrator.run_chain_sync(url)
+
+    return {
+        "score": result["authenticity_score"],
+        "verdict": result["final_verdict"],
+        "confidence": result["confidence"],
+    }
+
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

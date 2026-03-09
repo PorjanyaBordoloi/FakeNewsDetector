@@ -12,9 +12,8 @@ newspaper3k==0.2.8
 beautifulsoup4==4.12.3
 lxml_html_clean==0.4.1
 
-# ── ML Engine (Nayan's domain) ────────────────────────────
-transformers==4.36.0
-torch==2.1.0
+# ── LLM & AI ─────────────────────────────────────────────
+groq==0.13.0
 
 # ── Utilities ─────────────────────────────────────────────
 python-dotenv==1.0.0
